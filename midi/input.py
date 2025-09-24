@@ -25,3 +25,8 @@ def start_midi_listener(bus: EventBus, port_name_substr="Roland"):
 
     th = threading.Thread(target=run, daemon=True); th.start()
     return th
+
+
+
+def midi_to_freq(note: int) -> float:
+    return 440.0 * (2 ** ((note - 69) / 12))

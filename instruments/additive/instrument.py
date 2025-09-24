@@ -2,6 +2,7 @@ import numpy as np
 import threading
 from typing import Dict
 from .voice import Voice
+from midi.input import midi_to_freq
 
 SR = 44100
 
@@ -14,7 +15,7 @@ class AdditiveInstrument:
 
     def note_on(self, note: int, velocity: int) -> None:
         with self._lock:
-            self._voices[note] = Voice(self._midi_to_freq(note), velocity, sr=self.sr)
+            self._voices[note] = Voice(midi_to_freq(note), velocity, sr=self.sr)
 
     def note_off(self, note: int) -> None:
         with self._lock:
