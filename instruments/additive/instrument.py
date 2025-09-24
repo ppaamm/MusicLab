@@ -1,17 +1,16 @@
 import numpy as np
+import threading
 from typing import Dict
 from .voice import Voice
-import threading
 
 SR = 44100
 
 class AdditiveInstrument:
-    def __init__(self, sr=SR, n_partials=10):
+    def __init__(self, sr=SR):
         self.sr = sr
-        self.n_partials = n_partials
         self._voices: Dict[int, Voice] = {}
         self._lock = threading.Lock()
-        self.master = 0.8
+        self.master = 0.8  # instrument-level gain
 
     def note_on(self, note: int, velocity: int) -> None:
         with self._lock:
@@ -22,22 +21,18 @@ class AdditiveInstrument:
             v = self._voices.get(note)
             if v: v.note_off()
 
-    def cc(self, control: int, value: int) -> None:
-        # sustain, modwheel, etc. Hook as you like.
-        pass
-
     def render(self, frames: int) -> np.ndarray:
         with self._lock:
             mix = np.zeros(frames, dtype=np.float32)
             dead = []
-            for n, v in self._voices.items():
+            for key, v in self._voices.items():
                 mix += v.render(frames)
                 if v.finished():
-                    dead.append(n)
-            for n in dead:
-                self._voices.pop(n, None)
+                    dead.append(key)
+            for key in dead:
+                self._voices.pop(key, None)
 
-            # voice-count compensation
+            # voice-count comp here (instrument-level)
             numv = max(1, len(self._voices))
             mix *= (self.master / np.sqrt(numv))
             return mix
@@ -46,6 +41,4 @@ class AdditiveInstrument:
         with self._lock:
             return len(self._voices)
 
-    @staticmethod
-    def _midi_to_freq(note: int) -> float:
-        return 440.0 * (2 ** ((note - 69) / 12))
+

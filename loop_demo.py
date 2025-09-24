@@ -12,9 +12,9 @@ if __name__ == "__main__":
     engine.start()
 
     # 1-bar 16-step pattern at 120 BPM
-    steps = [Step(pitch=36 + (i%4)*2, vel=100, gate=0.6) if i%4!=3 else Step(pitch=None) for i in range(16)]
+    steps = [Step(pitch=69 + (i%4)*2, vel=20*(i%4)+25, gate=0.6) if i%4!=3 else Step(pitch=None) for i in range(16)]
     seq = StepSequencer(bus, steps, steps_per_beat=4)
-    clock = Clock(bpm=120, ppq=24)
+    clock = Clock(bpm=60, ppq=24)
     clock.start(lambda: seq.on_tick(ppq=24))
 
     print("Loop running. Ctrl+C to quit.")
