@@ -1,6 +1,6 @@
 from routing.bus import EventBus
 from audio.engine import AudioEngine
-from instruments.additive.instrument import AdditiveInstrument
+from instruments.signals.additive.instrument import AdditiveInstrument
 from sequencing.clock import Clock
 from sequencing.sequencer import StepSequencer, Step
 import time
