@@ -1,6 +1,7 @@
 from typing import Protocol
 import numpy as np
 import matplotlib.pyplot as plt
+import sounddevice as sd
 
 class Signal(Protocol):
     """A stateful, unlimited-time signal generator."""
@@ -25,3 +26,19 @@ class Signal(Protocol):
         plt.ylabel("Amplitude")
         plt.grid(True, alpha=0.3)
         plt.show()
+        
+        
+    def play_sample(self, freq: float, T: float = 1.0, sr: int = 44100, blocking=True):
+        
+        # Ensure float32 in [-1, 1] to avoid clipping
+        sig = self.render(freq, int(T * sr), sr)
+        if sig.dtype != np.float32:
+            # scale if values look like ints or outside [-1, 1]
+            max_abs = np.max(np.abs(sig))
+            if max_abs == 0:
+                max_abs = 1.0
+            if not np.issubdtype(sig.dtype, np.floating) or max_abs > 1.0:
+                sig = (sig / max_abs).astype(np.float32)
+            else:
+                sig = sig.astype(np.float32)
+        sd.play(sig, samplerate=sr, blocking=blocking)
