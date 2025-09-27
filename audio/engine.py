@@ -1,4 +1,3 @@
-# MusicLab/audio/engine.py
 import sounddevice as sd
 import numpy as np
 import threading, time
@@ -62,14 +61,14 @@ class AudioEngine:
         self._apply_events()
 
         # Render instrument (already includes 1/sqrt(Nvoices) compensation)
-        mix = self.instrument.render(frames)  # float32 mono
+        mix = self.instrument.render(frames, self.sr)  # float32 mono
 
         # Pre-gain for headroom
         if self.pre_gain != 1.0:
             mix = mix * self.pre_gain
 
         # Measure pre-limiter peak
-        pre_peak = float(np.max(np.abs(mix)))
+        pre_peak = float(np.max(np.abs(mix))) if mix.size else 0.0
 
         # Safety limiter (soft clip)
         limited_before = mix.copy()
@@ -79,13 +78,13 @@ class AudioEngine:
         limited = bool(np.any(np.abs(mix - limited_before) > 1e-7))
 
         # Final hard cap
-        post_peak = float(np.max(np.abs(mix)))
+        post_peak = float(np.max(np.abs(mix))) if mix.size else 0.0
         if post_peak > 1.0:
             mix = mix / post_peak
             post_peak = 1.0
 
         # Meter update (block RMS after limiting)
-        block_rms = float(np.sqrt(np.mean(mix.astype(np.float64)**2)))
+        block_rms = float(np.sqrt(np.mean(mix.astype(np.float64)**2))) if mix.size else 0.0
         self.meter.update(pre_peak=pre_peak, post_peak=post_peak, block_rms=block_rms,
                           limited=limited, frames=frames)
 
