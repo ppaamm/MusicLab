@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 class Signal(Protocol):
     """A stateful, unlimited-time signal generator."""
-    def render(self, freq: float, frames: int) -> np.ndarray:
+    def render(self, freq: float, frames: int, sr: int = 44100) -> np.ndarray:
         """Return `frames` samples (float32 mono), advancing internal state."""
         ...
         

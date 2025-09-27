@@ -2,16 +2,15 @@ import numpy as np
 from .base import Signal
 
 class Sine(Signal):
-    def __init__(self, sr: int = 44100, phase: float = 0.0, gain: float = 1.0):
-        self.sr = sr
+    def __init__(self, phase: float = 0.0, gain: float = 1.0):
         self.phase = float(phase)  # radians
         self.gain = float(gain)
 
-    def render(self, freq: float, frames: int) -> np.ndarray:
+    def render(self, freq: float, frames: int, sr: int = 44100) -> np.ndarray:
         out = np.empty(frames, dtype=np.float32)
         phase = self.phase
         twopi = 2 * np.pi
-        inc = twopi * freq / self.sr
+        inc = twopi * freq / sr
         
         for i in range(frames):
             phase += inc
@@ -27,16 +26,15 @@ class Sine(Signal):
 class SawNaive(Signal):
     """Naive saw (aliased)."""
     #TODO: Replace with band-limited later.
-    def __init__(self, sr: int = 44100, phase: float = 0.0, gain: float = 1.0):
-        self.sr = sr
+    def __init__(self, phase: float = 0.0, gain: float = 1.0):
         self.gain = float(gain)
         self.phase = float(phase) % 1.0  # phase in [0,1)
 
 
-    def render(self, freq: float, frames: int) -> np.ndarray:
+    def render(self, freq: float, frames: int, sr: int = 44100) -> np.ndarray:
         out = np.empty(frames, dtype=np.float32)
         phase = self.phase
-        inc = freq / self.sr
+        inc = freq / sr
         for i in range(frames):
             phase += inc
             if phase >= 1.0:
