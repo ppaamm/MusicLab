@@ -14,10 +14,10 @@ if __name__ == "__main__":
 
     # Instrument: additive poly synth (you can tweak n_partials, power, etc.)
     inst = make_additive_poly(
-        master=0.55,          # instrument-level gain
-        n_partials=6,         # harmonics count
+        master=0.9,          # instrument-level gain
+        n_partials=10,         # harmonics count
         power=6.0,            # 1/(k^power) rolloff
-        env_attack=0.005,     # ADSR params
+        env_attack=0.1,     # ADSR params
         #env_decay=0.08,
         #env_sustain=0.6,
         env_release=0.20,
@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
     # 1-bar 16-step pattern at 60 BPM (ppq=24), skipping every 4th step
     steps = [
-        Step(pitch=69 + (i % 4) * 2, vel=min(127, 20 * (i % 4) + 25), gate=0.6)
+        Step(pitch=69 + ((i + 2) % 4) * 2, vel=min(127, 20 * (i % 4) + 25), gate=0.6)
         if i % 4 != 3 else Step(pitch=None)
         for i in range(16)
     ]

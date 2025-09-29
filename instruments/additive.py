@@ -11,6 +11,17 @@ from . polyphonic import PolyInstrument
 def midi_to_freq(note: int) -> float:
     return 440.0 * (2 ** ((note - 69) / 12))
 
+def apply_micro_fade(buf: np.ndarray, sr: int, fade_ms: float = 1.0) -> None:
+    """In-place short linear fade-in/out to prevent clicks."""
+    n = len(buf)
+    k = min(n, int(sr * fade_ms * 0.001))
+    if k <= 1:
+        return
+    ramp = np.linspace(0.0, 1.0, k, dtype=buf.dtype)
+    buf[:k] *= ramp
+    buf[-k:] *= ramp[::-1]
+
+
 @dataclass
 class AdditiveVoice(Voice):
     """Voice = harmonic signal × envelope × velocity gain."""
@@ -28,7 +39,12 @@ class AdditiveVoice(Voice):
     def render(self, frames: int, sr: int) -> np.ndarray:
         raw = self.signal.render(self.freq, frames, sr)      # <- signals API
         env = self.env.render(frames, sr)                    # <- envelopes API
-        return (raw * env * self.vel_amp).astype(np.float32)
+        out = (raw * env * self.vel_amp).astype(np.float32)
+
+        # Apply a 3 ms fade to kill clicks
+        apply_micro_fade(out, sr, fade_ms=3.0)
+
+        return out
 
 class AdditiveInstrumentFactory:
     """
