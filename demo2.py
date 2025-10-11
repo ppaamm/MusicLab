@@ -12,17 +12,18 @@ if __name__ == "__main__":
     # Event bus
     bus = EventBus()
 
-    # Instrument: additive poly synth (you can tweak n_partials, power, etc.)
+    # Instrument: additive poly synth
     inst = make_additive_poly(
-        master=0.9,          # instrument-level gain
-        n_partials=10,         # harmonics count
-        power=6.0,            # 1/(k^power) rolloff
-        env_attack=0.1,     # ADSR params
-        #env_decay=0.08,
-        #env_sustain=0.6,
+        master=1.2,          # instrument-level gain
+        n_partials=5,         # harmonics count
+        power=2.0,            # 1/(k^power) rolloff
+        env_attack=0.5,     # ADSR params
+        env_decay=0.5,
+        env_sustain=0.3,
         env_release=0.20,
         velocity_curve=1.8,
     )
+    
 
     # Audio engine (must be the updated version that passes sr into instrument.render)
     engine = AudioEngine(inst, bus, sr=SR, blocksize=BLOCK, channels=1,
@@ -31,13 +32,13 @@ if __name__ == "__main__":
 
     # 1-bar 16-step pattern at 60 BPM (ppq=24), skipping every 4th step
     steps = [
-        Step(pitch=69 + ((i + 2) % 4) * 2, vel=min(127, 20 * (i % 4) + 25), gate=0.6)
+        Step(pitch=69 + ((i) % 4) * 2, vel=min(127, 20 * (i % 4) + 25), gate=0.6)
         if i % 4 != 3 else Step(pitch=None)
         for i in range(16)
     ]
     seq = StepSequencer(bus, steps, steps_per_beat=4)
 
-    clock = Clock(bpm=60, ppq=24)
+    clock = Clock(bpm=10, ppq=24)
     clock.start(lambda: seq.on_tick(ppq=24))
 
     print("Loop running. Ctrl+C to quit.")

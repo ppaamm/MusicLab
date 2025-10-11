@@ -57,16 +57,16 @@ class AdditiveInstrumentFactory:
         power: float = 6.0,           # amplitude law: 1/(k^power)
         velocity_curve: float = 1.8,  # vel amp = (vel/127)^curve
         env_attack: float = 0.005,
-        #env_decay: float = 0.08,
-        #env_sustain: float = 0.6,
+        env_decay: float = 0.08,
+        env_sustain: float = 0.6,
         env_release: float = 0.20,
     ):
         self.n_partials = int(n_partials)
         self.power = float(power)
         self.velocity_curve = float(velocity_curve)
         self.env_attack = float(env_attack)
-        #self.env_decay = float(env_decay)
-        #self.env_sustain = float(env_sustain)
+        self.env_decay = float(env_decay)
+        self.env_sustain = float(env_sustain)
         self.env_release = float(env_release)
 
     def _amps(self) -> np.ndarray:
@@ -77,11 +77,11 @@ class AdditiveInstrumentFactory:
     def voice(self, note: int, velocity: int) -> AdditiveVoice:
         f0 = midi_to_freq(note)
         sig = HarmonicStack(self._amps())                # phase kept inside, freq passed each render
-        # env = ADSR(attack=self.env_attack,
-        #            decay=self.env_decay,
-        #            sustain=self.env_sustain,
-        #            release=self.env_release)
-        env = PeakEnvelope(self.env_attack, self.env_release)
+        env = ADSR(attack=self.env_attack,
+                    decay=self.env_decay,
+                    sustain=self.env_sustain,
+                    release=self.env_release)
+        # env = PeakEnvelope(self.env_attack, self.env_release)
         env.gate_on()
         vel_amp = (max(0, min(127, velocity)) / 127.0) ** self.velocity_curve
         return AdditiveVoice(freq=f0, signal=sig, env=env, vel_amp=vel_amp)
