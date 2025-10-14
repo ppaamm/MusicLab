@@ -1,5 +1,3 @@
-# instruments/instrument/poly.py
-
 import numpy as np
 import threading
 from typing import List, Tuple, Callable
@@ -13,13 +11,16 @@ class PolyFrequencyInstrument(FrequencyInstrument):
     1/sqrt(N) gain comp + master, where N = nb of voices
     """
 
-    def __init__(self, voice_factory: Callable[[int, int], Voice], master: float = 0.6):
+    def __init__(self, voice_factory: Callable[[int, int], Voice], 
+                 master: float = 0.6, alpha: float = 0.25):
         self._vf = voice_factory
         # store (note, voice, pending_release_flag)
         self._voices: List[Tuple[int, Voice, bool]] = []
         self._lock = threading.Lock()
         self._sustain = False
         self.master = float(master)
+        self._last_gain = self.master
+        self.alpha = alpha
         self._pending_release: set[float] = set()
 
     def note_on(self, freq_hz: int, velocity: int) -> None:
@@ -58,20 +59,29 @@ class PolyFrequencyInstrument(FrequencyInstrument):
 
 
 
+    def _smoothing_gain(self, target_gain):
+        """
+        Smoothes gain changes
+        """
+        return (1 - self.alpha) * self._last_gain + self.alpha * target_gain
+        
+
     def render(self, frames: int, sr: int) -> np.ndarray:
         with self._lock:
             mix = np.zeros(frames, dtype=np.float32)
-            new_list: List[Tuple[float, Voice, bool]] = []
+            n_start = max(1, len(self._voices))
+            
+            alive: List[Tuple[float, Voice, bool]] = []
 
             for freq, v, pending in self._voices:
                 mix += v.render(frames, sr)
                 if not v.finished():
-                    new_list.append((freq, v, pending))
-            self._voices = new_list
-
-            # normalize by √N for consistent loudness
-            n = max(1, len(self._voices))
-            mix *= self.master / np.sqrt(n)
+                    alive.append((freq, v, pending))
+            self._voices = alive
+            
+            gain = self._smoothing_gain(self.master / np.sqrt(n_start))
+            self._last_gain = gain
+            mix *= gain
             return mix
 
     def num_active_voices(self) -> int:

@@ -1,5 +1,3 @@
-# demo_midi_additive.py
-
 from routing.bus import EventBus
 from audio.engine import AudioEngine
 from sequencing.clock import Clock
@@ -19,7 +17,7 @@ if __name__ == "__main__":
     # Instrument: additive synth with a MIDI note API (wrapping the freq-based version)
     # You can swap midi_to_freq=... to try alternate tunings.
     inst = make_additive_frequency(
-        master=1.2,           # instrument-level gain (might be hot; adjust if needed)
+        master=1,           # instrument-level gain (might be hot; adjust if needed)
         n_partials=1,         # harmonics count
         power=2.0,            # 1/(k^power) rolloff
         env_attack=0.01,       # ADSR params
