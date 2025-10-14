@@ -2,9 +2,17 @@ import numpy as np
 from typing import Callable
 from . base import MidiInstrument, FrequencyInstrument
 
-def midi_to_freq_equal_tempered(note: int) -> float:
-    """Default: standard 12-TET tuning (A4 = 440 Hz)."""
-    return 440.0 * (2 ** ((int(note) - 69) / 12))
+
+def midi_to_freq_equal_tempered(note: int, 
+                                base_note: int = 69, base_freq: float = 440.0,
+                                n_tones: int = 12
+                                ) -> float:
+    """
+    Equal-tempered tuning
+    """
+    return base_freq * (2 ** ((int(note) - int(base_note)) / n_tones))
+
+
 
 class MidiInstrumentAdapter(MidiInstrument):
     """

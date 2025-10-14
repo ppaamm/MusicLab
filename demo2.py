@@ -28,7 +28,9 @@ if __name__ == "__main__":
         # midi_to_freq=midi_to_freq_equal_tempered  # (default) 12-TET A4=440
     )
     
-    inst = MidiInstrumentAdapter(inst, midi_to_freq_equal_tempered)
+    
+    midi_to_freq = lambda note: midi_to_freq_equal_tempered(note, n_tones=50)
+    inst = MidiInstrumentAdapter(inst, midi_to_freq)
     
     # Audio engine (passes sr into instrument.render)
     engine = AudioEngine(
