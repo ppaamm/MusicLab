@@ -1,9 +1,13 @@
+# demo_midi_additive.py
+
 from routing.bus import EventBus
 from audio.engine import AudioEngine
-from instruments.additive import make_additive_poly
 from sequencing.clock import Clock
 from sequencing.sequencer import StepSequencer, Step
 import time
+
+from instruments.additive import make_additive_frequency
+from instruments.midi import midi_to_freq_equal_tempered, MidiInstrumentAdapter
 
 SR = 44100
 BLOCK = 256
@@ -12,22 +16,28 @@ if __name__ == "__main__":
     # Event bus
     bus = EventBus()
 
-    # Instrument: additive poly synth
-    inst = make_additive_poly(
-        master=1.2,          # instrument-level gain
-        n_partials=5,         # harmonics count
+    # Instrument: additive synth with a MIDI note API (wrapping the freq-based version)
+    # You can swap midi_to_freq=... to try alternate tunings.
+    inst = make_additive_frequency(
+        master=1.2,           # instrument-level gain (might be hot; adjust if needed)
+        n_partials=1,         # harmonics count
         power=2.0,            # 1/(k^power) rolloff
-        env_attack=0.5,     # ADSR params
-        env_decay=0.5,
-        env_sustain=0.3,
-        env_release=0.20,
+        env_attack=0.01,       # ADSR params
+        env_decay=0.1,
+        env_sustain=0.8,
+        env_release=0.2,
         velocity_curve=1.8,
+        # midi_to_freq=midi_to_freq_equal_tempered  # (default) 12-TET A4=440
     )
     
-
-    # Audio engine (must be the updated version that passes sr into instrument.render)
-    engine = AudioEngine(inst, bus, sr=SR, blocksize=BLOCK, channels=1,
-                         pre_gain=0.3, limiter_drive=1.15, meter_period=1.0)
+    inst = MidiInstrumentAdapter(inst, midi_to_freq_equal_tempered)
+    
+    # Audio engine (passes sr into instrument.render)
+    engine = AudioEngine(
+        inst, bus,
+        sr=SR, blocksize=BLOCK, channels=1,
+        pre_gain=0.3, limiter_drive=1.15, meter_period=1.0
+    )
     engine.start()
 
     # 1-bar 16-step pattern at 60 BPM (ppq=24), skipping every 4th step
@@ -38,7 +48,7 @@ if __name__ == "__main__":
     ]
     seq = StepSequencer(bus, steps, steps_per_beat=4)
 
-    clock = Clock(bpm=10, ppq=24)
+    clock = Clock(bpm=60, ppq=24)
     clock.start(lambda: seq.on_tick(ppq=24))
 
     print("Loop running. Ctrl+C to quit.")

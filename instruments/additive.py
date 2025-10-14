@@ -1,33 +1,15 @@
 import numpy as np
 from dataclasses import dataclass
-from typing import Callable
 from . signals.compose import HarmonicStack
-from . envelopes.base import Envelope
 from . envelopes.adsr import ADSR
-from . envelopes.peak import PeakEnvelope
-from . base import Voice
-from . polyphonic import PolyInstrument
-
-def midi_to_freq(note: int) -> float:
-    return 440.0 * (2 ** ((note - 69) / 12))
-
-def apply_micro_fade(buf: np.ndarray, sr: int, fade_ms: float = 1.0) -> None:
-    """In-place short linear fade-in/out to prevent clicks."""
-    n = len(buf)
-    k = min(n, int(sr * fade_ms * 0.001))
-    if k <= 1:
-        return
-    ramp = np.linspace(0.0, 1.0, k, dtype=buf.dtype)
-    buf[:k] *= ramp
-    buf[-k:] *= ramp[::-1]
-
+from . base import Voice, FrequencyInstrument
+from . polyphonic import PolyFrequencyInstrument
 
 @dataclass
-class AdditiveVoice(Voice):
-    """Voice = harmonic signal × envelope × velocity gain."""
+class AdditiveFreqVoice(Voice):
     freq: float
     signal: HarmonicStack
-    env: Envelope
+    env: ADSR
     vel_amp: float
 
     def note_off(self) -> None:
@@ -37,25 +19,19 @@ class AdditiveVoice(Voice):
         return self.env.finished()
 
     def render(self, frames: int, sr: int) -> np.ndarray:
-        raw = self.signal.render(self.freq, frames, sr)      # <- signals API
-        env = self.env.render(frames, sr)                    # <- envelopes API
-        out = (raw * env * self.vel_amp).astype(np.float32)
+        raw = self.signal.render(self.freq, frames, sr)
+        env = self.env.render(frames, sr)
+        return (raw * env * self.vel_amp).astype(np.float32)
 
-        # Apply a 3 ms fade to kill clicks
-        apply_micro_fade(out, sr, fade_ms=3.0)
-
-        return out
-
-class AdditiveInstrumentFactory:
+class AdditiveFreqFactory:
     """
-    Factory for creating additive voices with a given partial law and envelope settings.
-    Use with PolyInstrument: PolyInstrument(voice_factory=factory.voice, master=0.6)
+    Factory to build frequency-domain additive voices.
     """
     def __init__(
         self,
         n_partials: int = 8,
         power: float = 6.0,           # amplitude law: 1/(k^power)
-        velocity_curve: float = 1.8,  # vel amp = (vel/127)^curve
+        velocity_curve: float = 1.8,
         env_attack: float = 0.005,
         env_decay: float = 0.08,
         env_sustain: float = 0.6,
@@ -74,23 +50,13 @@ class AdditiveInstrumentFactory:
         s = float(np.sum(np.abs(amps))) or 1.0
         return amps / s
 
-    def voice(self, note: int, velocity: int) -> AdditiveVoice:
-        f0 = midi_to_freq(note)
-        sig = HarmonicStack(self._amps())                # phase kept inside, freq passed each render
-        env = ADSR(attack=self.env_attack,
-                    decay=self.env_decay,
-                    sustain=self.env_sustain,
-                    release=self.env_release)
-        # env = PeakEnvelope(self.env_attack, self.env_release)
+    def voice(self, freq_hz: float, velocity: int) -> AdditiveFreqVoice:
+        sig = HarmonicStack(self._amps())
+        env = ADSR(self.env_attack, self.env_decay, self.env_sustain, self.env_release)
         env.gate_on()
-        vel_amp = (max(0, min(127, velocity)) / 127.0) ** self.velocity_curve
-        return AdditiveVoice(freq=f0, signal=sig, env=env, vel_amp=vel_amp)
+        vel_amp = (max(0, min(127, int(velocity))) / 127.0) ** self.velocity_curve
+        return AdditiveFreqVoice(freq=float(freq_hz), signal=sig, env=env, vel_amp=vel_amp)
 
-def make_additive_poly(master: float = 0.6, **factory_kwargs) -> PolyInstrument:
-    """
-    Convenience: create a PolyInstrument configured for additive synthesis.
-    Example:
-        inst = make_additive_poly(master=0.5, n_partials=6, power=6.0)
-    """
-    factory = AdditiveInstrumentFactory(**factory_kwargs)
-    return PolyInstrument(voice_factory=factory.voice, master=master)
+def make_additive_frequency(master: float = 0.6, **factory_kwargs) -> FrequencyInstrument:
+    fac = AdditiveFreqFactory(**factory_kwargs)
+    return PolyFrequencyInstrument(voice_factory=fac.voice, master=master)

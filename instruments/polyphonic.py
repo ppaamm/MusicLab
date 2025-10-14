@@ -3,12 +3,14 @@
 import numpy as np
 import threading
 from typing import List, Tuple, Callable
-from .base import Instrument, Voice
+from .base import FrequencyInstrument, Voice
 
-class PolyInstrument(Instrument):
+
+class PolyFrequencyInstrument(FrequencyInstrument):
     """
     Keeps multiple voices per note to avoid clicks on retrigger.
-    Sustain pedal supported. 1/sqrt(N) gain comp + master.
+    Sustain pedal supported. 
+    1/sqrt(N) gain comp + master, where N = nb of voices
     """
 
     def __init__(self, voice_factory: Callable[[int, int], Voice], master: float = 0.6):
@@ -18,21 +20,28 @@ class PolyInstrument(Instrument):
         self._lock = threading.Lock()
         self._sustain = False
         self.master = float(master)
+        self._pending_release: set[float] = set()
 
-    def note_on(self, note: int, velocity: int) -> None:
-        v = self._vf(note, velocity)
+    def note_on(self, freq_hz: int, velocity: int) -> None:
+        v = self._vf(float(freq_hz), int(velocity))
+            
         with self._lock:
-            # append; DO NOT replace existing same-note voices
-            self._voices.append((note, v, False))
+            self._voices.append((freq_hz, v, False))
+            self._pending_release.discard(freq_hz)
+            
 
-    def note_off(self, note: int) -> None:
+    def note_off(self, freq_hz: float) -> None:
+        f = float(freq_hz)
         with self._lock:
-            for i, (n, v, pend) in enumerate(self._voices):
-                if n == note:
+            for i, (freq, v, pending) in enumerate(self._voices):
+                if abs(freq - f) < 1e-6 and not pending:
                     if self._sustain:
-                        self._voices[i] = (n, v, True)  # mark for release later
+                        self._voices[i] = (freq, v, True)
                     else:
                         v.note_off()
+                
+                
+                
 
     def cc(self, control: int, value: int) -> None:
         if control != 64:  # sustain
@@ -40,26 +49,29 @@ class PolyInstrument(Instrument):
         pedal = value >= 64
         with self._lock:
             if self._sustain and not pedal:
-                # pedal released -> trigger release on pendings
-                for i, (n, v, pend) in enumerate(self._voices):
-                    if pend:
+                for f in list(self._pending_release):
+                    v = self._voices.get(f)
+                    if v is not None:
                         v.note_off()
-                        self._voices[i] = (n, v, False)
+                self._pending_release.clear()
             self._sustain = pedal
+
+
 
     def render(self, frames: int, sr: int) -> np.ndarray:
         with self._lock:
             mix = np.zeros(frames, dtype=np.float32)
-            alive: List[Tuple[int, Voice, bool]] = []
-            for n, v, pend in self._voices:
+            new_list: List[Tuple[float, Voice, bool]] = []
+
+            for freq, v, pending in self._voices:
                 mix += v.render(frames, sr)
                 if not v.finished():
-                    alive.append((n, v, pend))
-            self._voices = alive
+                    new_list.append((freq, v, pending))
+            self._voices = new_list
 
-            # 1/sqrt(N) comp + master
-            numv = max(1, len(self._voices))
-            mix *= (self.master / np.sqrt(numv))
+            # normalize by √N for consistent loudness
+            n = max(1, len(self._voices))
+            mix *= self.master / np.sqrt(n)
             return mix
 
     def num_active_voices(self) -> int:
