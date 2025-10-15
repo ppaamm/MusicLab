@@ -18,7 +18,7 @@ if __name__ == "__main__":
     # You can swap midi_to_freq=... to try alternate tunings.
     inst = make_additive_frequency(
         master=1,           # instrument-level gain (might be hot; adjust if needed)
-        partials = {1.: 1., 2.0: 0.3, 5.0: 0.7},
+        partials = {1.: 1., 2.5: 0.3, 5.1: 0.7},
         env_attack=0.01,       # ADSR params
         env_decay=0.1,
         env_sustain=0.8,

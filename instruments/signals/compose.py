@@ -63,7 +63,7 @@ class Detune(Signal):
         
         
         
-class HarmonicStack(Signal):
+class SpectralStack(Signal):
     """
     Additive sine stack at k*f0 with fixed amplitudes (L1-normalized).
     Keeps per-partial phase for continuity; uses incoming sr each call.

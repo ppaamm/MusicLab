@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Dict
 from dataclasses import dataclass
-from . signals.compose import HarmonicStack
+from . signals.compose import SpectralStack
 from . envelopes.adsr import ADSR
 from . base import Voice, FrequencyInstrument
 from . polyphonic import PolyFrequencyInstrument
@@ -9,7 +9,7 @@ from . polyphonic import PolyFrequencyInstrument
 @dataclass
 class AdditiveFreqVoice(Voice):
     freq: float
-    signal: HarmonicStack
+    signal: SpectralStack
     env: ADSR
     vel_amp: float
 
@@ -48,7 +48,7 @@ class AdditiveFreqFactory:
         self.env_release = float(env_release)
 
     def voice(self, freq_hz: float, velocity: int) -> AdditiveFreqVoice:
-        sig = HarmonicStack(self.partials)
+        sig = SpectralStack(self.partials)
         env = ADSR(self.env_attack, self.env_decay, self.env_sustain, self.env_release)
         env.gate_on()
         vel_amp = (max(0, min(127, int(velocity))) / 127.0) ** self.velocity_curve
