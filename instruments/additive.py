@@ -29,29 +29,23 @@ class AdditiveFreqFactory:
     """
     def __init__(
         self,
-        n_partials: int = 8,
-        power: float = 6.0,           # amplitude law: 1/(k^power)
+        amplitudes: np.ndarray,
         velocity_curve: float = 1.8,
         env_attack: float = 0.005,
         env_decay: float = 0.08,
         env_sustain: float = 0.6,
         env_release: float = 0.20,
     ):
-        self.n_partials = int(n_partials)
-        self.power = float(power)
+        self.n_partials = amplitudes.shape[0]
+        self.amplitudes = amplitudes / np.sum(np.abs(amplitudes))
         self.velocity_curve = float(velocity_curve)
         self.env_attack = float(env_attack)
         self.env_decay = float(env_decay)
         self.env_sustain = float(env_sustain)
         self.env_release = float(env_release)
 
-    def _amps(self) -> np.ndarray:
-        amps = np.array([1.0 / ((k+1) ** self.power) for k in range(self.n_partials)], dtype=np.float64)
-        s = float(np.sum(np.abs(amps))) or 1.0
-        return amps / s
-
     def voice(self, freq_hz: float, velocity: int) -> AdditiveFreqVoice:
-        sig = HarmonicStack(self._amps())
+        sig = HarmonicStack(self.amplitudes)
         env = ADSR(self.env_attack, self.env_decay, self.env_sustain, self.env_release)
         env.gate_on()
         vel_amp = (max(0, min(127, int(velocity))) / 127.0) ** self.velocity_curve
