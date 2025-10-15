@@ -59,32 +59,48 @@ class Detune(Signal):
     
     def reset(self) -> None:
         self.inner.reset()
-        
-        
 
+        
+        
+        
 class HarmonicStack(Signal):
     """
     Additive sine stack at k*f0 with fixed amplitudes (L1-normalized).
     Keeps per-partial phase for continuity; uses incoming sr each call.
     """
-    def __init__(self, amps: np.ndarray):
-        amps = np.asarray(amps, dtype=np.float64)
-        s = float(np.sum(np.abs(amps))) or 1.0
-        self.amps = (amps / s).astype(np.float64)
-        self.phases = np.zeros(len(self.amps), dtype=np.float64)
+    def __init__(self, partials: np.ndarray):
+        S = sum(partials.values())
+        self.partials = {k : v / S for k, v in partials.items()}
+        self.phases = {k : 0. for k, v in partials.items()}
 
-    def render(self, freq: float, frames: int, sr: int=44100) -> np.ndarray:
-        twopi = 2 * np.pi
+    def render(self, freq: float, frames: int, sr: int = 44100) -> np.ndarray:
+        """
+        Sum of sinusoids at frequencies k * freq with amplitudes self.partials[k].
+        """
+        twopi = 2.0 * np.pi
         out = np.zeros(frames, dtype=np.float32)
-        phase = self.phases
-        incs  = (twopi * (np.arange(1, len(self.amps)+1) * float(freq)) / float(sr))
+    
+        # Deterministic order over partials
+        ks = sorted(self.partials.keys())
+    
+        # Build arrays for fast math
+        amps   = np.array([self.partials[k] for k in ks], dtype=np.float64)
+        phases = np.array([self.phases[k] for k in ks], dtype=np.float64)
+        incs   = (twopi * (np.array(ks, dtype=np.float64) * float(freq)) / float(sr))
+    
+        # Sample-by-sample accumulation (simple, phase-continuous)
         for i in range(frames):
-            phase += incs
-            # cheap wrap
-            phase -= np.floor(phase / twopi) * twopi
-            out[i] = np.sin(phase) @ self.amps
-        self.phases = phase
+            phases += incs
+            phases -= np.floor(phases / twopi) * twopi  # wrap to [0, 2π)
+            out[i] = np.sin(phases) @ amps
+    
+        # Write back updated phases into the dict
+        for k, ph in zip(ks, phases):
+            self.phases[k] = ph
+    
         return out
-
+    
     def reset(self) -> None:
-        self.phases[:] = 0.0
+        """Reset all stored phases to 0."""
+        for k in list(self.phases.keys()):
+            self.phases[k] = 0.0

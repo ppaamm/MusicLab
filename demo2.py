@@ -3,7 +3,6 @@ from audio.engine import AudioEngine
 from sequencing.clock import Clock
 from sequencing.sequencer import StepSequencer, Step
 import time
-import numpy as np
 
 from instruments.additive import make_additive_frequency
 from instruments.midi import midi_to_freq_equal_tempered, MidiInstrumentAdapter
@@ -19,13 +18,12 @@ if __name__ == "__main__":
     # You can swap midi_to_freq=... to try alternate tunings.
     inst = make_additive_frequency(
         master=1,           # instrument-level gain (might be hot; adjust if needed)
-        amplitudes= np.array([1.0, 1.0]),
+        partials = {1.: 1., 2.0: 0.3, 5.0: 0.7},
         env_attack=0.01,       # ADSR params
         env_decay=0.1,
         env_sustain=0.8,
         env_release=0.2,
-        velocity_curve=1.5,
-        # midi_to_freq=midi_to_freq_equal_tempered  # (default) 12-TET A4=440
+        velocity_curve=1.5
     )
     
     

@@ -12,7 +12,7 @@ class PolyFrequencyInstrument(FrequencyInstrument):
     """
 
     def __init__(self, voice_factory: Callable[[int, int], Voice], 
-                 master: float = 0.6, alpha: float = 0.25):
+                 master: float = 0.6, alpha: float = 0.05):
         self._vf = voice_factory
         # store (note, voice, pending_release_flag)
         self._voices: List[Tuple[int, Voice, bool]] = []
