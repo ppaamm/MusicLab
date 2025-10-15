@@ -2,9 +2,10 @@ from routing.bus import EventBus
 from audio.engine import AudioEngine
 from sequencing.clock import Clock
 from sequencing.sequencer import StepSequencer, Step
+from instruments.envelopes.adsr import ADSR
 import time
 
-from instruments.additive import make_additive_frequency
+from instruments.additive import make_additive_frequency, make_spectral_frequency
 from instruments.midi import midi_to_freq_equal_tempered, MidiInstrumentAdapter
 
 SR = 44100
@@ -16,15 +17,37 @@ if __name__ == "__main__":
 
     # Instrument: additive synth with a MIDI note API (wrapping the freq-based version)
     # You can swap midi_to_freq=... to try alternate tunings.
-    inst = make_additive_frequency(
-        master=1,           # instrument-level gain (might be hot; adjust if needed)
-        partials = {1.: 1., 2.5: 0.3, 5.1: 0.7},
-        env_attack=0.01,       # ADSR params
-        env_decay=0.1,
-        env_sustain=0.8,
-        env_release=0.2,
-        velocity_curve=1.5
-    )
+    # inst = make_additive_frequency(
+    #     master=1,           # instrument-level gain (might be hot; adjust if needed)
+    #     partials = {1.: (1., 0.), 
+    #                 2.5: (0.3, 0.), 
+    #                 5.1: (0.2, 0.)},
+    #     env_attack=0.01,       # ADSR params
+    #     env_decay=0.1,
+    #     env_sustain=0.8,
+    #     env_release=0.2,
+    #     velocity_curve=1.5
+    # )
+    
+    
+    
+    partials = {
+        1.00: (1.0, 0.0),
+        2.00: (0.4, 0.0),
+        #3.00: (0.25, 0.0),
+    }
+    
+    envs = {
+        1.00: ADSR(0.01, 0.08, 0.7, 0.2),
+        2.00: ADSR(0.02, 0.12, 0.5, 0.25),
+        #3.00: ADSR(0.05, 0.30, 0.0, 0.8),
+    }
+    
+    inst = make_spectral_frequency(partials=partials, envs=envs, master=0.5, velocity_curve=1.6)
+    
+    
+    
+    
     
     
     midi_to_freq = lambda note: midi_to_freq_equal_tempered(note, n_tones=12)

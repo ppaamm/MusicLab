@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Sequence
+from typing import Sequence, Dict, Tuple, List
 from .base import Signal
 
 class Sum(Signal):
@@ -68,39 +68,75 @@ class SpectralStack(Signal):
     Additive sine stack at k*f0 with fixed amplitudes (L1-normalized).
     Keeps per-partial phase for continuity; uses incoming sr each call.
     """
-    def __init__(self, partials: np.ndarray):
-        S = sum(partials.values())
-        self.partials = {k : v / S for k, v in partials.items()}
-        self.phases = {k : 0. for k, v in partials.items()}
+    def __init__(self, partials: Dict[float, Tuple[float, float]],):
+        # S = sum(partials.values())
+        # self.partials = {k : v / S for k, v in partials.items()}
+        # self.phases = {k : 0. for k, v in partials.items()}
+        
+        items = sorted(partials.items(), key=lambda kv: kv[0])   # deterministic order
+        self.ratios = np.array([k for k, _ in items], dtype=np.float64)
+        
+        self.amps    = np.array([v[0] for _, v in items], dtype=np.float64)
+        S = float(np.sum(np.abs(self.amps)))
+        self.amps /= S
+        
+        self._phi0   = np.array([v[1] for _, v in items], dtype=np.float64)
+        self.phases  = np.mod(self._phi0, 2.0 * np.pi)
+        
+        
+        
+        
+    def render_partials(self, freq: float, frames: int, sr: int
+                        ) -> Tuple[np.ndarray, List[float]]:
+        """
+        Return a matrix of per-partial oscillator samples (already scaled by 
+        per-partial amplitude), shape (P, frames), and the list of ratios used 
+        (active subset under Nyquist).
+        """
+        two_pi = 2.0 * np.pi
+        
+        outP = np.zeros((np.sum(self.ratios.size), frames), dtype=np.float32)
+        if frames <= 0 or self.ratios.size == 0:
+            return outP[:0, :], []
+
+        f0 = float(freq); nyq = 0.5 * float(sr)
+        f_partials = self.ratios * f0
+        active = (f_partials > 0.0) & (f_partials < nyq)
+        if not np.any(active):
+            return outP[:0, :], []
+
+        ratios = self.ratios[active]
+        amps   = self.amps[active]
+        phi    = self.phases[active]
+        inc    = (two_pi * f_partials[active]) / float(sr)
+
+        P = ratios.size
+        Y = np.empty((P, frames), dtype=np.float32)
+        n = np.arange(frames, dtype=np.float64)
+
+        # vectorized per-partial phase ramps
+        # phi_k[n] = phi0_k + n * inc_k
+        phi_mat = phi[:, None] + n[None, :] * inc[:, None]
+        phi_mat = phi_mat - np.floor(phi_mat / two_pi) * two_pi
+        Y[:] = (np.sin(phi_mat) * amps[:, None]).astype(np.float32)
+
+        # advance phases by frames samples
+        self.phases[active] = (phi + frames * inc) % two_pi
+        return Y, list(ratios)
+        
+        
 
     def render(self, freq: float, frames: int, sr: int = 44100) -> np.ndarray:
         """
         Sum of sinusoids at frequencies k * freq with amplitudes self.partials[k].
+        This render is probably not the one to be used directly, since envelopes 
+        should be applied on each frequency individually, on not on the whole
+        signal. 
         """
-        twopi = 2.0 * np.pi
-        out = np.zeros(frames, dtype=np.float32)
+        Y, _ = self.render_partials(freq, frames, sr)
+        return Y.sum(axis=0) if Y.size else np.zeros(frames, dtype=np.float32)
     
-        # Deterministic order over partials
-        ks = sorted(self.partials.keys())
-    
-        # Build arrays for fast math
-        amps   = np.array([self.partials[k] for k in ks], dtype=np.float64)
-        phases = np.array([self.phases[k] for k in ks], dtype=np.float64)
-        incs   = (twopi * (np.array(ks, dtype=np.float64) * float(freq)) / float(sr))
-    
-        # Sample-by-sample accumulation (simple, phase-continuous)
-        for i in range(frames):
-            phases += incs
-            phases -= np.floor(phases / twopi) * twopi  # wrap to [0, 2π)
-            out[i] = np.sin(phases) @ amps
-    
-        # Write back updated phases into the dict
-        for k, ph in zip(ks, phases):
-            self.phases[k] = ph
-    
-        return out
     
     def reset(self) -> None:
-        """Reset all stored phases to 0."""
-        for k in list(self.phases.keys()):
-            self.phases[k] = 0.0
+        """Reset all stored phases to the initial phases."""
+        self._phi = np.mod(self._phi0, 2.0 * np.pi)

@@ -2,6 +2,7 @@ import numpy as np
 from typing import Dict, Callable, List, Tuple
 from dataclasses import dataclass
 from . signals.compose import SpectralStack
+from . envelopes.base import Envelope
 from . envelopes.adsr import ADSR
 from . base import Voice, FrequencyInstrument
 import threading
@@ -39,8 +40,7 @@ class AdditiveFreqFactory:
         env_release: float = 0.20,
     ):
         self.n_partials = len(partials)
-        S = sum(partials.values())
-        self.partials = {k : v / S for k, v in partials.items()}
+        self.partials = partials
         self.velocity_curve = float(velocity_curve)
         self.env_attack = float(env_attack)
         self.env_decay = float(env_decay)
@@ -104,9 +104,7 @@ class PolyFrequencyInstrument(FrequencyInstrument):
                         self._voices[i] = (freq, v, True)
                     else:
                         v.note_off()
-                
-                
-                
+      
 
     def cc(self, control: int, value: int) -> None:
         if control != 64:  # sustain
@@ -117,7 +115,7 @@ class PolyFrequencyInstrument(FrequencyInstrument):
                 for f in list(self._pending_release):
                     v = self._voices.get(f)
                     if v is not None:
-                        v.note_off()
+                        v.note_off()    
                 self._pending_release.clear()
             self._sustain = pedal
 
@@ -151,3 +149,66 @@ class PolyFrequencyInstrument(FrequencyInstrument):
     def num_active_voices(self) -> int:
         with self._lock:
             return len(self._voices)
+
+
+
+
+@dataclass
+class SpectralVoice(Voice):
+    freq: float
+    bank: SpectralStack                   # oscillator bank (amp+phase only)
+    partial_envs: Dict[float, Envelope]   # key: ratio -> envelope
+    vel_amp: float = 1.0
+
+    def note_off(self) -> None:
+        # delegate gate_off to all envelopes
+        for env in self.partial_envs.values():
+            env.gate_off()
+
+    def finished(self) -> bool:
+        # finished when all envelopes are finished
+        return all(env.finished() for env in self.partial_envs.values())
+
+    def render(self, frames: int, sr: int) -> np.ndarray:
+        Y, ratios = self.bank.render_partials(self.freq, frames, sr)   # shape (P, frames)
+        if Y.size == 0:
+            return np.zeros(frames, dtype=np.float32)
+
+        # apply per-partial envelopes
+        for i, r in enumerate(ratios):
+            env = self.partial_envs.get(r)
+            if env is None:
+                # if no specific envelope provided, treat as constant 1
+                continue
+            Y[i, :] *= env.render(frames, sr)
+
+        out = Y.sum(axis=0).astype(np.float32)
+        return out * float(self.vel_amp)
+    
+    
+def make_spectral_frequency(
+    partials: Dict[float, Tuple[float, float]],   # ratio -> (amp, phase)
+    envs: Dict[float, ADSR] | None = None,        # ratio -> envelope; if None, all-ones
+    master: float = 0.6,
+    velocity_curve: float = 1.8,
+) -> FrequencyInstrument:
+    bank = SpectralStack(partials)
+
+    def vf(freq_hz: float, velocity: int) -> SpectralVoice:
+        v = (max(0, min(127, int(velocity))) / 127.0) ** float(velocity_curve)
+        # clone envelopes per voice if needed (or supply fresh instances upstream)
+        penvs = {}
+        if envs:
+            for r, e in envs.items():
+                # naive: assume envelopes are fresh instances already
+                penvs[float(r)] = e
+        # ensure every ratio has an envelope (fallback unity envelope)
+        # If you want explicit unity envs, create a ConstantEnvelope(1.0)
+        # and put it here for missing keys.
+        for r in bank.ratios:
+            penvs.setdefault(float(r), ADSR(0,0,1,0))  # sustain=1 "constant" (cheap hack)
+            penvs[float(r)].gate_on()
+
+        return SpectralVoice(freq=float(freq_hz), bank=bank, partial_envs=penvs, vel_amp=v)
+
+    return PolyFrequencyInstrument(voice_factory=vf, master=master)
