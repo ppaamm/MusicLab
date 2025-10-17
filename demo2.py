@@ -34,13 +34,13 @@ if __name__ == "__main__":
     partials = {
         1.00: (1.0, 0.0),
         2.00: (0.4, 0.0),
-        #3.00: (0.25, 0.0),
+        3.00: (0.25, 0.0),
     }
     
     envs = {
         1.00: ADSR(0.01, 0.08, 0.7, 0.2),
         2.00: ADSR(0.02, 0.12, 0.5, 0.25),
-        #3.00: ADSR(0.05, 0.30, 0.0, 0.8),
+        3.00: ADSR(0.05, 0.10, 0.1, 0.8),
     }
     
     inst = make_spectral_frequency(partials=partials, envs=envs, master=0.5, velocity_curve=1.6)

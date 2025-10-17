@@ -6,6 +6,7 @@ from . envelopes.base import Envelope
 from . envelopes.adsr import ADSR
 from . base import Voice, FrequencyInstrument
 import threading
+import copy
 
 @dataclass
 class AdditiveFreqVoice(Voice):
@@ -161,13 +162,12 @@ class SpectralVoice(Voice):
     vel_amp: float = 1.0
 
     def note_off(self) -> None:
-        # delegate gate_off to all envelopes
         for env in self.partial_envs.values():
             env.gate_off()
-
+    
     def finished(self) -> bool:
-        # finished when all envelopes are finished
-        return all(env.finished() for env in self.partial_envs.values())
+        # voice ends when all partial envelopes finished
+        return not self.partial_envs or all(e.finished() for e in self.partial_envs.values())
 
     def render(self, frames: int, sr: int) -> np.ndarray:
         Y, ratios = self.bank.render_partials(self.freq, frames, sr)   # shape (P, frames)
@@ -185,30 +185,45 @@ class SpectralVoice(Voice):
         out = Y.sum(axis=0).astype(np.float32)
         return out * float(self.vel_amp)
     
+
+
+def _clone_env(e: Envelope) -> Envelope:
+    """Try deepcopy; fall back to ADSR(a,d,s,r)-style reconstruction if needed."""
+    try:
+        return copy.deepcopy(e)
+    except Exception:
+        # minimal generic fallback for simple ADSR-like envelopes
+        cls = e.__class__
+        attrs = {k: getattr(e, k) for k in ("a", "d", "s", "r") if hasattr(e, k)}
+        return cls(**attrs) if attrs else cls()
     
+
+
 def make_spectral_frequency(
     partials: Dict[float, Tuple[float, float]],   # ratio -> (amp, phase)
     envs: Dict[float, ADSR] | None = None,        # ratio -> envelope; if None, all-ones
     master: float = 0.6,
     velocity_curve: float = 1.8,
 ) -> FrequencyInstrument:
-    bank = SpectralStack(partials)
+    
+    partials_sorted = dict(sorted(partials.items(), key=lambda kv: kv[0]))
 
-    def vf(freq_hz: float, velocity: int) -> SpectralVoice:
-        v = (max(0, min(127, int(velocity))) / 127.0) ** float(velocity_curve)
-        # clone envelopes per voice if needed (or supply fresh instances upstream)
-        penvs = {}
+    def voice_factory(freq_hz: float, velocity: int) -> SpectralVoice:
+        # IMPORTANT: fresh oscillator bank per voice
+        bank = SpectralStack(partials_sorted)
+
+        # IMPORTANT: fresh envelope instances per voice (don’t share!)
+        partial_envs: Dict[float, Envelope] = {}
         if envs:
-            for r, e in envs.items():
-                # naive: assume envelopes are fresh instances already
-                penvs[float(r)] = e
-        # ensure every ratio has an envelope (fallback unity envelope)
-        # If you want explicit unity envs, create a ConstantEnvelope(1.0)
-        # and put it here for missing keys.
-        for r in bank.ratios:
-            penvs.setdefault(float(r), ADSR(0,0,1,0))  # sustain=1 "constant" (cheap hack)
-            penvs[float(r)].gate_on()
+            for r, proto in envs.items():
+                e = _clone_env(proto)
+                e.gate_on()
+                partial_envs[float(r)] = e
 
-        return SpectralVoice(freq=float(freq_hz), bank=bank, partial_envs=penvs, vel_amp=v)
+        # velocity mapping
+        v = max(0, min(127, int(velocity))) / 127.0
+        vel_amp = v ** float(velocity_curve)
 
-    return PolyFrequencyInstrument(voice_factory=vf, master=master)
+        return SpectralVoice(freq=float(freq_hz), bank=bank, partial_envs=partial_envs, vel_amp=vel_amp)
+
+    return PolyFrequencyInstrument(voice_factory=voice_factory, master=master)
