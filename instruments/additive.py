@@ -153,6 +153,13 @@ class PolyFrequencyInstrument(FrequencyInstrument):
 
 
 
+@dataclass
+class PartialCharacteristics:
+    amplitude: float
+    phase: SpectralStack
+    env: Envelope
+
+
 
 @dataclass
 class SpectralVoice(Voice):
@@ -200,30 +207,33 @@ def _clone_env(e: Envelope) -> Envelope:
 
 
 def make_spectral_frequency(
-    partials: Dict[float, Tuple[float, float]],   # ratio -> (amp, phase)
-    envs: Dict[float, ADSR] | None = None,        # ratio -> envelope; if None, all-ones
+    partials: Dict[float, PartialCharacteristics],   # ratio -> characteristics
     master: float = 0.6,
     velocity_curve: float = 1.8,
 ) -> FrequencyInstrument:
     
-    partials_sorted = dict(sorted(partials.items(), key=lambda kv: kv[0]))
+    #partials_sorted = dict(sorted(partials.items(), key=lambda kv: kv[0]))
+    partials_sorted = dict([ (r, (ch.amplitude, ch.phase)) for r, ch in partials.items() ])
 
     def voice_factory(freq_hz: float, velocity: int) -> SpectralVoice:
         # IMPORTANT: fresh oscillator bank per voice
         bank = SpectralStack(partials_sorted)
 
-        # IMPORTANT: fresh envelope instances per voice (don’t share!)
+        # /!\ IMPORTANT: fresh envelope instances per voice
         partial_envs: Dict[float, Envelope] = {}
-        if envs:
-            for r, proto in envs.items():
-                e = _clone_env(proto)
+        if partials:
+            for ratio, characteristic in partials.items():
+                e = _clone_env(characteristic.env)
                 e.gate_on()
-                partial_envs[float(r)] = e
+                partial_envs[float(ratio)] = e
 
         # velocity mapping
         v = max(0, min(127, int(velocity))) / 127.0
         vel_amp = v ** float(velocity_curve)
 
-        return SpectralVoice(freq=float(freq_hz), bank=bank, partial_envs=partial_envs, vel_amp=vel_amp)
+        return SpectralVoice(freq=float(freq_hz), 
+                             bank=bank, 
+                             partial_envs=partial_envs, 
+                             vel_amp=vel_amp)
 
     return PolyFrequencyInstrument(voice_factory=voice_factory, master=master)

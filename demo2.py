@@ -5,7 +5,7 @@ from sequencing.sequencer import StepSequencer, Step
 from instruments.envelopes.adsr import ADSR
 import time
 
-from instruments.additive import make_additive_frequency, make_spectral_frequency
+from instruments.additive import make_additive_frequency, make_spectral_frequency, PartialCharacteristics
 from instruments.midi import midi_to_freq_equal_tempered, MidiInstrumentAdapter
 
 SR = 44100
@@ -30,20 +30,13 @@ if __name__ == "__main__":
     # )
     
     
-    
     partials = {
-        1.00: (1.0, 0.0),
-        2.00: (0.4, 0.0),
-        3.00: (0.25, 0.0),
+        1.00: PartialCharacteristics(1.0, 0.0, ADSR(0.01, 0.08, 0.7, 0.2)), 
+        2.00: PartialCharacteristics(0.4, 0.0, ADSR(0.02, 0.12, 0.5, 0.25)),
+        3.00: PartialCharacteristics(0.2, 0.0, ADSR(0.05, 0.10, 0.1, 0.8)),
     }
     
-    envs = {
-        1.00: ADSR(0.01, 0.08, 0.7, 0.2),
-        2.00: ADSR(0.02, 0.12, 0.5, 0.25),
-        3.00: ADSR(0.05, 0.10, 0.1, 0.8),
-    }
-    
-    inst = make_spectral_frequency(partials=partials, envs=envs, master=0.5, velocity_curve=1.6)
+    inst = make_spectral_frequency(partials=partials, master=0.5, velocity_curve=1.6)
     
     
     
