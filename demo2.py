@@ -50,7 +50,8 @@ if __name__ == "__main__":
     engine = AudioEngine(
         inst, bus,
         sr=SR, blocksize=BLOCK, channels=1,
-        pre_gain=0.3, limiter_drive=1.15, meter_period=1.0
+        pre_gain=0.3, limiter_drive=1.15, meter_period=1.0, 
+        #record_to="D:\\Documents\\test.wav"
     )
     engine.start()
 
