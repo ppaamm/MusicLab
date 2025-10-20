@@ -1,197 +1,223 @@
+# audio/engine.py
 import sounddevice as sd
 import numpy as np
-import threading, time, wave, queue
+import threading
+import wave, queue
+from typing import Optional
 
 from routing.bus import EventBus
-from midi.messages import NoteOn, NoteOff, CC
 from audio.dsp import soft_clip
 from audio.meter import AudioMeter
+from audio.mixer import Mixer
+
 
 class AudioEngine:
-    def __init__(self, instrument, bus: EventBus, sr=44100, blocksize=256, channels=1,
+    def __init__(self, mixer: Mixer, bus: EventBus, sr=44100, blocksize=256, channels=1,
                  pre_gain=0.3, limiter_drive=1.3, meter_period=1.0,
-                 record_to: str | None = None):
-        self.instrument = instrument
+                 record_to: Optional[str] = None):
+        self.mixer = mixer
         self.bus = bus
-        self.sr = sr
-        self.blocksize = blocksize
-        self.channels = channels
+        self.sr = int(sr)
+        self.blocksize = int(blocksize)
+        self.channels = int(channels)
 
-        # Gain/limiter
+        # processing
         self.pre_gain = float(pre_gain)
         self.limiter_drive = float(limiter_drive)
 
-        # Meter
+        # metering
         self.meter = AudioMeter(window_sec=meter_period)
-        self._meter_period = meter_period
-        self._meter_thread = None
-        self._run_meter = False
+        self._meter_period = float(meter_period)
+        self._meter_thread: Optional[threading.Thread] = None
 
-        # Recording
+        # coordinated shutdown
+        self._stop_evt = threading.Event()
+        
+        # recording
         self._record_path = record_to
-        self._rec_queue: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=64)
+        self._rec_queue: "queue.Queue[bytes]" = queue.Queue(maxsize=64)
         self._rec_run = False
-        self._rec_thread = None
-        self._wav = None  # wave.Wave_write
+        self._rec_thread: Optional[threading.Thread] = None
+        self._wav: Optional[wave.Wave_write] = None
 
+        # audio stream
         self.stream = sd.OutputStream(
-            channels=channels,
-            samplerate=sr,
-            blocksize=blocksize,
+            channels=self.channels,
+            samplerate=self.sr,
+            blocksize=self.blocksize,
             callback=self._cb,
             latency='low'
         )
 
-    # ---------- Public ----------
+    ###########################################################################
+    ##                              LIFECYCLE                                ##
+    ###########################################################################
     def start(self):
+        self._stop_evt.clear()
         self.stream.start()
 
-        # Meter thread
-        self._run_meter = True
-        self._meter_thread = threading.Thread(target=self._meter_logger, daemon=True)
+        # meter thread (non-daemon: we join it)
+        self._meter_thread = threading.Thread(target=self._meter_logger, name="AudioMeterThread")
         self._meter_thread.start()
 
-        # Recording writer thread
+        # recording
         if self._record_path:
             self._start_recording()
 
     def stop(self):
-        # stop meter
-        self._run_meter = False
-        if self._meter_thread:
-            self._meter_thread.join(timeout=0.2)
+        # tell threads to stop
+        self._stop_evt.set()
 
-        # stop audio first
-        self.stream.stop(); self.stream.close()
-
-        # stop recording thread & close file
-        if self._record_path:
-            self._stop_recording()
-
-    # ---------- Internals ----------
-    def _apply_events(self):
-        for e in self.bus.drain():
-            if   isinstance(e, NoteOn):  self.instrument.note_on(e.note, e.velocity)
-            elif isinstance(e, NoteOff): self.instrument.note_off(e.note)
-            elif isinstance(e, CC):      self.instrument.cc(e.control, e.value)
-
-    def _cb(self, outdata, frames, time_info, status):
-        if status:
-            # xruns etc.
-            # print("[SD status]", status)
+        # stop audio first to stop callbacks quickly
+        # abort() is immediate; stop() drains—abort helps kill callback loop promptly
+        try:
+            self.stream.abort()
+        except Exception:
+            pass
+        try:
+            self.stream.stop()
+        except Exception:
+            pass
+        try:
+            self.stream.close()
+        except Exception:
             pass
 
-        self._apply_events()
+        # join meter
+        if self._meter_thread:
+            self._meter_thread.join(timeout=2.0)
+            if self._meter_thread.is_alive():
+                print("[Engine] WARNING: meter thread still alive after join()")
+            self._meter_thread = None
 
-        # Render instrument (already includes 1/sqrt(Nvoices) compensation)
-        mix = self.instrument.render(frames, self.sr).astype(np.float32)  # mono float32 [-1,1]
+        # stop recording
+        if self._record_path:
+            self._stop_recording()
+        print("[Engine] stop() called")
 
-        # Pre-gain for headroom
+
+    ###########################################################################
+    ##                           AUDIO CALL BACK                             ##
+    ###########################################################################
+    
+    def _cb(self, outdata, frames, time_info, status):
+        # if we are stopping, output silence and return—do not do work
+        if self._stop_evt.is_set():
+            outdata.fill(0)
+            return
+
+        # route events to mixer
+        self.mixer.route_events(self.bus.drain())
+
+        # render
+        mix = self.mixer.render(frames, self.sr, channels=self.channels).astype(np.float32)
+
+        # pre-gain
         if self.pre_gain != 1.0:
-            mix = mix * self.pre_gain
+            mix *= self.pre_gain
 
-        # Measure pre-limiter peak
+        # limiter
         pre_peak = float(np.max(np.abs(mix))) if mix.size else 0.0
+        mix_lim = soft_clip(mix, drive=self.limiter_drive)
 
-        # Safety limiter (soft clip)
-        limited_before = mix.copy()
-        mix = soft_clip(mix, drive=self.limiter_drive)
-
-        # Detect if limiting changed samples
-        limited = bool(np.any(np.abs(mix - limited_before) > 1e-7))
-
-        # Final hard cap
-        post_peak = float(np.max(np.abs(mix))) if mix.size else 0.0
+        post_peak = float(np.max(np.abs(mix_lim))) if mix_lim.size else 0.0
         if post_peak > 1.0:
-            mix = mix / post_peak
+            mix_lim /= post_peak
             post_peak = 1.0
 
-        # Meter update (block RMS after limiting)
-        block_rms = float(np.sqrt(np.mean(mix.astype(np.float64)**2))) if mix.size else 0.0
+        # meter (after limiting)
+        block_rms = float(np.sqrt(np.mean(mix_lim.astype(np.float64)**2))) if mix_lim.size else 0.0
+        limited = bool(np.any(np.abs(mix_lim - mix) > 1e-7))
         self.meter.update(pre_peak=pre_peak, post_peak=post_peak, block_rms=block_rms,
                           limited=limited, frames=frames)
 
-        # Output (mono to all channels)
-        outdata[:, 0] = mix
-        if outdata.shape[1] > 1:
-            outdata[:, 1] = mix
+        # write to device
+        if self.channels == 1:
+            outdata[:, 0] = mix_lim
+            if outdata.shape[1] > 1:
+                outdata[:, 1] = mix_lim
+        else:
+            outdata[:, :2] = mix_lim[:, :2]
 
-        # ---- Recording enqueue (non-blocking) ----
-        if self._record_path and self._rec_run:
-            # prepare interleaved int16 frames for N channels
+        # enqueue for recording (non-blocking)
+        if self._record_path and self._rec_run and not self._stop_evt.is_set() :
+            blk = mix_lim
+            blk = np.clip(blk, -1.0, 1.0)
             if self.channels == 1:
-                block = mix.copy()
+                pcm16 = (blk * 32767.0).astype(np.int16).tobytes()
             else:
-                # duplicate mono to all channels
-                block = np.tile(mix[:, None], (1, self.channels)).reshape(-1).astype(np.float32)
-
-            # Convert to 16-bit PCM
-            block = np.clip(block, -1.0, 1.0)
-            pcm16 = (block * 32767.0).astype(np.int16)
-
-            # If stereo and we didn't reshape yet, interleave:
-            if self.channels > 1 and pcm16.ndim == 1 and pcm16.size == frames:
-                # interleave identical channels
-                pcm16 = np.repeat(pcm16, self.channels)
-
+                pcm16 = (blk * 32767.0).astype(np.int16).ravel(order='C').tobytes()
             try:
-                self._rec_queue.put_nowait(pcm16.tobytes())
+                self._rec_queue.put_nowait(pcm16)
             except queue.Full:
-                # drop if writer is behind (don't block audio)
+                # drop; never block audio
                 pass
 
-    # --- logger thread: print every ~meter_period seconds ---
+    ###########################################################################
+    ##                           METERING THREAD                             ##
+    ###########################################################################
     def _meter_logger(self):
-        while self._run_meter:
-            time.sleep(self._meter_period)
+        period = self._meter_period
+        
+        while True:
+            # wait() returns True if event was set during timeout—exit promptly
+            if self._stop_evt.wait(timeout=period):
+                break
+            if self._stop_evt.is_set():
+                break
+            
             snap = self.meter.snapshot_and_reset()
             bar = self._bar(snap["peak_post_db"])
             lim = " LIM" if snap["limited_blocks"] > 0 else ""
-            print(f"[Audio] peak(pre/post): {snap['peak_pre_db']:+6.1f} dBFS / {snap['peak_post_db']:+6.1f} dBFS | "
-                  f"rms: {snap['rms_db']:+6.1f} dBFS | frames:{snap['frames']:5d} | blocks_limited:{snap['limited_blocks']:2d} {bar}{lim}")
+            print(f"[Audio] peak(pre/post): {snap['peak_pre_db']:+6.1f} dBFS / "
+                  f"{snap['peak_post_db']:+6.1f} dBFS | rms: {snap['rms_db']:+6.1f} dBFS | "
+                  f"frames:{snap['frames']:5d} | blocks_limited:{snap['limited_blocks']:2d} {bar}{lim}")
 
     @staticmethod
     def _bar(db, floor=-60.0, ceil=0.0, width=20):
-        # quick ASCII meter bar
         db = max(floor, min(ceil, db))
         fill = int((db - floor) / (ceil - floor) * width + 0.5)
         return " [" + ("#" * fill).ljust(width, ".") + "]"
 
-    # ---------- Recording helpers ----------
+
+    ###########################################################################
+    ##                              RECORDING                                ##
+    ###########################################################################
+    
     def _start_recording(self):
-        # open wave file
         self._wav = wave.open(self._record_path, mode='wb')
         self._wav.setnchannels(self.channels)
         self._wav.setsampwidth(2)  # 16-bit
         self._wav.setframerate(self.sr)
 
         self._rec_run = True
-        self._rec_thread = threading.Thread(target=self._rec_writer, daemon=True)
+        self._rec_thread = threading.Thread(target=self._rec_writer)
         self._rec_thread.start()
         print(f"[REC] Recording to {self._record_path}")
 
     def _stop_recording(self):
         self._rec_run = False
         if self._rec_thread:
-            self._rec_thread.join(timeout=1.0)
+            self._rec_thread.join()
             self._rec_thread = None
         if self._wav:
             try:
                 self._wav.close()
             finally:
                 self._wav = None
-        # drain queue if any (optional)
 
     def _rec_writer(self):
-        # consume blocks and write to disk
+        # drain until told to stop AND queue is empty
         while self._rec_run or not self._rec_queue.empty():
             try:
-                data = self._rec_queue.get(timeout=0.2)
+                data = self._rec_queue.get(timeout=0.25)
             except queue.Empty:
+                # also exit promptly if engine is stopping and no data
+                if self._stop_evt.is_set():
+                    break
                 continue
             try:
                 self._wav.writeframes(data)
             except Exception as e:
-                # if disk error, stop recording
                 print(f"[REC] write error: {e}")
                 self._rec_run = False
