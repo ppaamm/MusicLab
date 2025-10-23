@@ -142,7 +142,8 @@ class PolyFrequencyInstrument(FrequencyInstrument):
                     alive.append((freq, v, pending))
             self._voices = alive
             
-            gain = self._smoothing_gain(self.master / np.sqrt(n_start))
+            #gain = self._smoothing_gain(self.master / np.sqrt(n_start))
+            gain = self.master
             self._last_gain = gain
             mix *= gain
             return mix
