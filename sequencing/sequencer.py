@@ -34,6 +34,7 @@ class StepSequencer:
         if gate_ticks and (self.tick_count % ticks_per_step) == gate_ticks:
             s = self.steps[self.idx]
             if s.pitch is not None:
+                print("-- Note off: ", self.channel)
                 self.bus.post(NoteOff(s.pitch, self.channel))
         if (self.tick_count % ticks_per_step) == (ticks_per_step - 1):
             self.idx = (self.idx + 1) % len(self.steps)
